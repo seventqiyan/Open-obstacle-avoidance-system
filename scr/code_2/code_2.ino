@@ -1,79 +1,92 @@
-/*如果避障响应方向不对修改固定值即可如：1600变1400，1400变1600*/
-unsigned int distance_Q0, distance_Q1,angle;
-/*以下为传感器引脚定义*/
-const int CSB_Q = 0, CSB_H = 1, CSB_Z = 2, CSB_Y = 3;
-#include<Servo.h>//Arduino Nano 2;3(Pin)
-const int AIL_PWM = 2;//中断输入
-const int ELE_PWM = 3;//中断输入
-const int LED_PIN = 13;//LED灯
-unsigned long RC_AIL_PulseStartTicks, RC_ELE_PulseStartTicks;
-volatile int RC_AIL, RC_ELE;
-unsigned int OUT_AIL, OUT_ELE;
-unsigned int AIL_MIN = 1000, AIL_MAX = 2000;
-unsigned int ELE_MIN = 1000, ELE_MAX = 2000;
-Servo AIL; Servo ELE;
-
-/*********************************/
-void RC_AIL_Void()//AIL中断程序
-{
-  if (digitalRead( AIL_PWM ) == HIGH)
-    RC_AIL_PulseStartTicks = micros();
-  else
-    RC_AIL = micros() - RC_AIL_PulseStartTicks;
-}
-void RC_ELE_Void()//ELE中断程序
-{
-  if (digitalRead( ELE_PWM ) == HIGH)
-    RC_ELE_PulseStartTicks = micros();
-  else
-    RC_ELE = micros() - RC_ELE_PulseStartTicks;
-}
-void setup()
-{
-  attachInterrupt(0, RC_AIL_Void, CHANGE);
-  attachInterrupt(1, RC_ELE_Void, CHANGE);
-  AIL.attach(10);
-  ELE.attach(11);
-  pinMode(AIL_PWM, INPUT);
-  pinMode(ELE_PWM, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  Serial.begin(9600);
-  ADCSRA |=  (1 << ADPS2);
-  ADCSRA &=  ~(1 << ADPS1);
-  ADCSRA &=  ~(1 << ADPS0);
-}
-void loop()
-{
-  OUT_AIL = map(RC_AIL, AIL_MIN, AIL_MAX, 1000, 2000);
-  OUT_ELE = map(RC_ELE, ELE_MIN, ELE_MAX, 1000, 2000);
-  digitalWrite(LED_PIN, LOW);
-//避障部分代码
+#include <PinChangeInt.h>    
+ #include <PinChangeIntConfig.h>
+ #include <TimerOne.h>       
 
 
+ //这两行定义使用PORTD来连接接收机，即Arduino的数字口0-7
+ #define NO_PORTB_PINCHANGES
+ #define NO_PORTC_PINCHANGES
+ #define PIN_COUNT 5    //这里只用五个通道，可以自行增减
+ #define MAX_PIN_CHANGE_PINS PIN_COUNT
 
- 
-  AIL.writeMicroseconds(OUT_AIL);
-  ELE.writeMicroseconds(OUT_ELE);
-  // Print();
-}
 
-/*void Print()
-  {
-  Serial.print("INAIL=");
-  Serial.print(RC_AIL);
-  Serial.print(" INELE=");
-  Serial.print(RC_ELE);
-  Serial.print(" OUTAIL=");
-  Serial.print(OUT_AIL);
-  Serial.print(" OUTELE=");
-  Serial.print(OUT_ELE);
-  Serial.print(" distance_Q=");
-  Serial.print(distance_Q);
-  Serial.print(" distance_H=");
-  Serial.print(distance_H);
-  Serial.print(" distance_Z=");
-  Serial.print(distance_Z);
-  Serial.print(" distance_Y=");
-  Serial.print(distance_Y);
-  Serial.println();
-  }*/
+ byte pin[] = {2,3,4,5,6};    //定义用数字口2-6连接通道1-5
+ unsigned int time[] = {0,0,0,0,0}; // 这里储存遥控信号，数值一般为[1000,2000]左右
+
+
+ byte state=0;
+ byte i=0;      //用来遍历每个通道
+ int count = 0; //用来记录loop（）被执行了多少次
+
+
+ void setup() 
+ {
+     Serial.begin(9600);
+     Serial.println("PinChangeInt ReciverReading test");
+
+
+     Timer1.initialize(2200);    //初始化定时器范围为2200ms，因为一般遥控信号不会超过这个值
+     Timer1.stop();               
+     Timer1.restart();           //把定时器设为0，启动后，定时器会从0加到2200，再从2200减到0，不断往复
+
+
+     for (byte i=0; i<PIN_COUNT; i++)
+     {
+         pinMode(pin[i], INPUT);     //把Arduino引脚设为输入
+         digitalWrite(pin[i], HIGH); //把Arduino引脚设为内部上拉
+     }
+     PCintPort::attachInterrupt(pin[i],rise,RISING); // 把PinChangeInt连在第一个通道上，上升沿触发
+ }
+
+
+ void loop() 
+ {
+   count++;
+   //如果已经循环12000次，输出数据，因为数据读取非常快，不必每次读取都输出数据</span>
+   if(count == 12000)
+   {
+         Serial.print("Channel:\t");
+         for (byte i=0; i<PIN_COUNT;i++)
+         {
+             Serial.print(i);
+             Serial.print(":");
+             Serial.print(time[i]);
+             Serial.print(" ");            
+         }
+         Serial.println();        
+         count = 0;
+   }
+     
+     switch (state)
+     {
+         //若刚刚已经在上升沿触发了中断，把中断改成下降沿触发，以此来计算高电平持续时间，即遥控信号
+         case RISING: //we have just seen a rising edge
+             PCintPort::detachInterrupt(pin[i]);
+             PCintPort::attachInterrupt(pin[i], fall, FALLING); 
+             state=255;
+             break;
+         case FALLING: //we just saw a falling edge
+             PCintPort::detachInterrupt(pin[i]);
+             i++;                
+             i = i % PIN_COUNT;  //i取值在0-PIN_COUNT
+             PCintPort::attachInterrupt(pin[i], rise,RISING);
+             state=255;
+             break;
+     }
+ }
+
+
+ void rise()        //上升沿触发的中断处理函数
+ {
+     Timer1.restart();        //定时器归零
+     Timer1.start();            //开始计时
+     state=RISING;
+ }
+
+
+ void fall()        //下降<span style="font-family: Arial, Helvetica, sans-serif;">沿触发的中断处理函数</span>
+ {
+     state=FALLING;
+     time[i]=Timer1.read();                                
+     Timer1.stop();
+ }
