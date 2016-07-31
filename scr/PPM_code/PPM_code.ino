@@ -70,7 +70,7 @@ void PWM_OUT() {
   PIT.writeMicroseconds(RC_[6]);
 }
 int SERIAL_OBS(int OBS) {
-  delay(60);
+ // delay(60);
   Serial.write(0x54);//模块测距命令
   Serial.write(OBS);//模块地址
   while (Serial.available() > 0)
